@@ -140,14 +140,11 @@ fi
 # 3. Install the connector to a stable location
 # ---------------------------------------------------------------------------
 step "Installing the Starface connector to $INSTALL_DIR"
-mkdir -p "$INSTALL_DIR"
-for item in dist package.json package-lock.json; do
-  [ -e "$SRC/$item" ] && cp -R "$SRC/$item" "$INSTALL_DIR/"
-done
-[ -d "$INSTALL_DIR/dist" ] || die "Connector files missing. Contact Jason."
-( cd "$INSTALL_DIR" && PATH="$NODE_DIR:$PATH" "$NODE_DIR/npm" install --omit=dev --no-audit --no-fund )
+# The connector is a single self-contained bundle (all dependencies included),
+# so there is no npm install — nothing is fetched from the npm registry.
+mkdir -p "$INSTALL_DIR/dist"
+cp "$SRC/dist/server.js" "$INSTALL_DIR/dist/server.js" || die "Connector files missing. Contact Jason."
 SERVER_JS="$INSTALL_DIR/dist/server.js"
-[ -f "$SERVER_JS" ] || die "Connector build missing at $SERVER_JS. Contact Jason."
 ok "Connector installed"
 
 # ---------------------------------------------------------------------------
