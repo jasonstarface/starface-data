@@ -81,24 +81,46 @@ fi
 NODE_DIR="$(cd "$(dirname "$NODE_BIN")" && pwd)"
 
 # ---------------------------------------------------------------------------
-# 2. Google Cloud SDK (gcloud) — reuse if present, else install to home (no admin)
+# 2. Google sign-in tool (gcloud) — reuse if present, else install to home.
+#    gcloud is written in Python, and macOS ships none by default, so we also
+#    install a small standalone Python and point gcloud at it. No admin needed.
 # ---------------------------------------------------------------------------
 step "Setting up Google sign-in tool"
 GCLOUD=""
 if command -v gcloud >/dev/null 2>&1; then
   GCLOUD="$(command -v gcloud)"
   ok "Using existing gcloud"
-elif [ -x "$GCLOUD_DIR/bin/gcloud" ]; then
-  GCLOUD="$GCLOUD_DIR/bin/gcloud"
-  ok "Using installed gcloud"
 else
-  warn "Installing the Google Cloud SDK into your home folder (~150 MB — this can take a few minutes)…"
-  curl -fsSL https://sdk.cloud.google.com -o "$TMP/gcloud_install.sh" || die "Could not download the Google Cloud SDK installer."
-  rm -rf "$GCLOUD_DIR"
-  bash "$TMP/gcloud_install.sh" --disable-prompts --install-dir="$HOME" >/dev/null 2>&1 || true
+  # 2a. Standalone Python (only if we don't already have one).
+  if [ ! -x "$RUNTIME_DIR/python/bin/python3" ]; then
+    case "$(uname -m)" in
+      arm64) PYARCH="aarch64-apple-darwin" ;;
+      x86_64) PYARCH="x86_64-apple-darwin" ;;
+      *) die "Unsupported Mac chip: $(uname -m)" ;;
+    esac
+    PYURL="$("$NODE_BIN" "$SRC/scripts/pick-python-asset.mjs" "$PYARCH")" \
+      || die "Couldn't find a Python download for your Mac. Contact Jason."
+    warn "Installing a small Python into your home folder (~25 MB)…"
+    curl -fSL --retry 3 --retry-delay 2 "$PYURL" -o "$TMP/python.tar.gz" || die "Python download failed."
+    mkdir -p "$RUNTIME_DIR"
+    tar xzf "$TMP/python.tar.gz" -C "$RUNTIME_DIR"   # -> $RUNTIME_DIR/python/bin/python3
+    [ -x "$RUNTIME_DIR/python/bin/python3" ] || die "Python install failed."
+  fi
+  export CLOUDSDK_PYTHON="$RUNTIME_DIR/python/bin/python3"
+
+  # 2b. gcloud SDK (only if we don't already have it). Extract-and-run — we never
+  #     run its install.sh, so no system Python is ever required.
+  if [ ! -x "$GCLOUD_DIR/bin/gcloud" ]; then
+    warn "Installing the Google sign-in tool into your home folder (~45 MB — this can take a minute)…"
+    curl -fSL --http1.1 --retry 3 --retry-delay 2 \
+      "https://dl.google.com/dl/cloudsdk/channels/rapid/google-cloud-sdk.tar.gz" \
+      -o "$TMP/gcloud.tar.gz" || die "Google sign-in tool download failed."
+    rm -rf "$GCLOUD_DIR"
+    tar xzf "$TMP/gcloud.tar.gz" -C "$HOME"   # -> $HOME/google-cloud-sdk
+  fi
   GCLOUD="$GCLOUD_DIR/bin/gcloud"
-  [ -x "$GCLOUD" ] || die "Google Cloud SDK install failed. Contact Jason."
-  ok "Google Cloud SDK installed"
+  [ -x "$GCLOUD" ] || die "Google sign-in tool install failed. Contact Jason."
+  ok "Google sign-in tool ready"
 fi
 
 # ---------------------------------------------------------------------------
