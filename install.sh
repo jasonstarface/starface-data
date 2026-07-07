@@ -24,6 +24,20 @@ ok()   { printf "\033[0;32m✓\033[0m %s\n" "$1"; }
 warn() { printf "\033[0;33m!\033[0m %s\n" "$1"; }
 die()  { printf "\033[0;31m✗ %s\033[0m\n" "$1" >&2; exit 1; }
 
+# Resilient download: resume partial transfers and retry, so a flaky network or
+# a mid-transfer "connection reset" recovers instead of failing the whole install.
+dl() { # url  outfile
+  local url="$1" out="$2" i
+  for i in 1 2 3 4 5 6; do
+    if curl -fSL -C - --connect-timeout 30 --speed-time 30 --speed-limit 2048 -o "$out" "$url"; then
+      return 0
+    fi
+    printf "   …retry %s/6\n" "$i" >&2
+    sleep 3
+  done
+  return 1
+}
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -71,7 +85,7 @@ else
   FILE="$(curl -fsSL "$BASE/" | grep -oE "node-v22\.[0-9]+\.[0-9]+-darwin-$NARCH\.tar\.gz" | head -1)"
   [ -n "$FILE" ] || die "Couldn't find a Node download for your Mac. Contact Jason."
   warn "Installing Node into your home folder (~15 MB)…"
-  curl -fsSL "$BASE/$FILE" -o "$TMP/node.tar.gz" || die "Node download failed."
+  dl "$BASE/$FILE" "$TMP/node.tar.gz" || die "Node download failed (network). Try again on a stronger connection."
   rm -rf "$RUNTIME_DIR/node" && mkdir -p "$RUNTIME_DIR/node"
   tar xzf "$TMP/node.tar.gz" -C "$RUNTIME_DIR/node" --strip-components=1
   NODE_BIN="$RUNTIME_DIR/node/bin/node"
@@ -101,7 +115,7 @@ else
     PYURL="$("$NODE_BIN" "$SRC/scripts/pick-python-asset.mjs" "$PYARCH")" \
       || die "Couldn't find a Python download for your Mac. Contact Jason."
     warn "Installing a small Python into your home folder (~25 MB)…"
-    curl -fSL --retry 3 --retry-delay 2 "$PYURL" -o "$TMP/python.tar.gz" || die "Python download failed."
+    dl "$PYURL" "$TMP/python.tar.gz" || die "Python download failed (network). Try again on a stronger connection."
     mkdir -p "$RUNTIME_DIR"
     tar xzf "$TMP/python.tar.gz" -C "$RUNTIME_DIR"   # -> $RUNTIME_DIR/python/bin/python3
     [ -x "$RUNTIME_DIR/python/bin/python3" ] || die "Python install failed."
@@ -112,9 +126,8 @@ else
   #     run its install.sh, so no system Python is ever required.
   if [ ! -x "$GCLOUD_DIR/bin/gcloud" ]; then
     warn "Installing the Google sign-in tool into your home folder (~45 MB — this can take a minute)…"
-    curl -fSL --http1.1 --retry 3 --retry-delay 2 \
-      "https://dl.google.com/dl/cloudsdk/channels/rapid/google-cloud-sdk.tar.gz" \
-      -o "$TMP/gcloud.tar.gz" || die "Google sign-in tool download failed."
+    dl "https://dl.google.com/dl/cloudsdk/channels/rapid/google-cloud-sdk.tar.gz" "$TMP/gcloud.tar.gz" \
+      || die "Google sign-in tool download failed (network). Try again on a stronger connection."
     rm -rf "$GCLOUD_DIR"
     tar xzf "$TMP/gcloud.tar.gz" -C "$HOME"   # -> $HOME/google-cloud-sdk
   fi
